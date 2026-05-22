@@ -50,7 +50,10 @@ chmod +x install.sh
 ```
 *Note: Sudo privileges are only requested if the application is installed in system-protected folders (like `/opt`).*
 
-### macOS
+### macOS (Experimental)
+> [!WARNING]
+> **Untested Platform**: The macOS version of this patcher is **untested**. Use at your own risk. Ensure you have backed up any critical data before running.
+
 Supports macOS (Apple Silicon & Intel). The patcher dynamically detects macOS, resolves the application bundle path, and installs custom fonts via Homebrew.
 
 ```bash
@@ -88,7 +91,7 @@ chmod +x rollback.sh
 ./rollback.sh
 ```
 
-### macOS
+### macOS (Experimental)
 To revert back to the original layout:
 ```bash
 # Grant execution permissions
