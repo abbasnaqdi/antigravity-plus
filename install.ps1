@@ -163,7 +163,7 @@ Write-Host "  • Base Font Size:  $LIGHT_GRAY$FONT_SIZE`pt$RESET"
 Write-Host "  • Max Corner Rad:  $LIGHT_GRAY$BORDER_RADIUS`px$RESET"
 Write-Host "  • Bi-directional:  $LIGHT_GRAY$INPUT_BIDI$RESET"
 Write-Host "  • Anti-aliasing:   $LIGHT_GRAY$INPUT_SMOOTH$RESET"
-Write-Host "  • Custom CSS Path: $LIGHT_GRAY$($CUSTOM_CSS_PATH ? $CUSTOM_CSS_PATH : 'None')$RESET"
+Write-Host "  • Custom CSS Path: $LIGHT_GRAY$(if ($CUSTOM_CSS_PATH) { $CUSTOM_CSS_PATH } else { 'None' })$RESET"
 Write-Host "$GRAY──────────────────────────────────────────────────────────$RESET"
 
 $confirm = Read-Host "  Apply configurations and modify production assets? [Y/n] (default: Y)"
@@ -238,17 +238,28 @@ $INJECT_CSS = @"
     --border-radius: $($BORDER_RADIUS)px !important;
     --radius: $($BORDER_RADIUS)px !important;
     --rad: $($BORDER_RADIUS)px !important;
+    --base-font-size: $($FONT_SIZE)pt !important;
 }
 
 $BIDI_OPTS
 
 * {
     font-family: $UI_FONT !important;
-    font-size: $($FONT_SIZE)pt !important;
-    line-height: 1.65 !important;
     letter-spacing: -0.01em !important;
     $SMOOTHING_OPTS
 }
+
+body, html, p, span, div, li, a, input, textarea, select, button, label {
+    font-size: var(--base-font-size) !important;
+    line-height: 1.65 !important;
+}
+
+h1 { font-size: calc(var(--base-font-size) * 2) !important; line-height: 1.25 !important; }
+h2 { font-size: calc(var(--base-font-size) * 1.5) !important; line-height: 1.3 !important; }
+h3 { font-size: calc(var(--base-font-size) * 1.25) !important; line-height: 1.35 !important; }
+h4 { font-size: calc(var(--base-font-size) * 1.1) !important; line-height: 1.4 !important; }
+h5, h6 { font-size: var(--base-font-size) !important; line-height: 1.45 !important; }
+small { font-size: calc(var(--base-font-size) * 0.85) !important; line-height: 1.5 !important; }
 
 :host, :host *, body, html,
 p, span, div, li, a, h1, h2, h3, h4, h5, h6,
@@ -294,7 +305,7 @@ $JS_PATCH = @"
 
 // Antigravity Deep UI Patcher - Frame & Webview Level Interceptor
 try {
-    const { app: electronApp, webContents } = require('electron');
+    const { app: electronApp, webContents, webFrameMain } = require('electron');
     const fs = require('fs');
 
     const coreCss = Buffer.from('$B64_CSS', 'base64').toString('utf-8');
@@ -337,6 +348,8 @@ try {
     }
 
     const jsPayload = "(function() {\n" +
+        "  if (window.gravityHooked) return;\n" +
+        "  window.gravityHooked = true;\n" +
         "  const styleText = " + JSON.stringify(getFullCss()) + ";\n" +
         "  let sharedSheet = null;\n" +
         "  const injectedRoots = new Set();\n" +
@@ -469,8 +482,15 @@ try {
 
         contents.on('did-frame-finish-load', (event, isMainFrame, frameProcessId, frameRoutingId) => {
             contents.insertCSS(getFullCss(), { cssOrigin: 'user' }).catch(() => {});
-            if (typeof frameRoutingId !== 'undefined' && contents.executeJavaScriptInFrame) {
-                contents.executeJavaScriptInFrame(frameRoutingId, jsPayload).catch(() => {});
+            if (typeof frameRoutingId !== 'undefined' && typeof webFrameMain !== 'undefined' && webFrameMain.fromId) {
+                try {
+                    const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
+                    if (frame) {
+                        frame.executeJavaScript(jsPayload).catch(() => {});
+                    }
+                } catch(e) {
+                    contents.executeJavaScript(jsPayload).catch(() => {});
+                }
             } else {
                 contents.executeJavaScript(jsPayload).catch(() => {});
             }
@@ -484,8 +504,12 @@ try {
 Write-Host "  $DIM`○ Injecting styling payloads...$RESET"
 Add-Content -Path $TARGET_PATH -Value $JS_PATCH -Encoding UTF8
 
+if (Test-Path "app.asar.disabled") { Remove-Item -Force "app.asar.disabled" }
 Rename-Item "app.asar" "app.asar.disabled"
-if (Test-Path "app.asar.unpacked") { Rename-Item "app.asar.unpacked" "app.asar.unpacked.disabled" }
+if (Test-Path "app.asar.unpacked") {
+    if (Test-Path "app.asar.unpacked.disabled") { Remove-Item -Recurse -Force "app.asar.unpacked.disabled" }
+    Rename-Item "app.asar.unpacked" "app.asar.unpacked.disabled"
+}
 
 Write-Host "  $GREEN✓ Core engine patched successfully.$RESET"
 

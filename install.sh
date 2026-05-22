@@ -270,19 +270,20 @@ map_font_to_apt() {
         "dejavu sans mono"|"dejavu") echo "fonts-dejavu-core" ;;
         *)
             local clean_name=$(echo "$font_name" | tr -d ' ' | tr -d '-')
-            local search_res=""
             if [ -n "$clean_name" ]; then
-                search_res=$(apt-cache search "^fonts-$clean_name" 2>/dev/null | awk '{print $1}' | head -n1 || true)
-            fi
-            if [ -n "$search_res" ]; then
-                echo "$search_res"
-            else
-                local fuzzy_res=$(apt-cache search "fonts-" 2>/dev/null | grep -i "font-$clean_name" | awk '{print $1}' | head -n1 || true)
-                if [ -n "$fuzzy_res" ]; then
-                    echo "$fuzzy_res"
+                local search_res=$(apt-cache search "^fonts-$clean_name" 2>/dev/null | awk '{print $1}' | head -n1 || true)
+                if [ -n "$search_res" ]; then
+                    echo "$search_res"
                 else
-                    echo ""
+                    local fuzzy_res=$(apt-cache search "fonts-" 2>/dev/null | grep -i "font-$clean_name" | awk '{print $1}' | head -n1 || true)
+                    if [ -n "$fuzzy_res" ]; then
+                        echo "$fuzzy_res"
+                    else
+                        echo ""
+                    fi
                 fi
+            else
+                echo ""
             fi
             ;;
     esac
@@ -579,17 +580,28 @@ INJECT_CSS="
     --border-radius: ${BORDER_RADIUS}px !important;
     --radius: ${BORDER_RADIUS}px !important;
     --rad: ${BORDER_RADIUS}px !important;
+    --base-font-size: ${FONT_SIZE}pt !important;
 }
 
 ${BIDI_OPTS}
 
 * {
     font-family: ${UI_FONT} !important;
-    font-size: ${FONT_SIZE}pt !important;
-    line-height: 1.65 !important;
     letter-spacing: -0.01em !important;
     ${SMOOTHING_OPTS}
 }
+
+body, html, p, span, div, li, a, input, textarea, select, button, label {
+    font-size: var(--base-font-size) !important;
+    line-height: 1.65 !important;
+}
+
+h1 { font-size: calc(var(--base-font-size) * 2) !important; line-height: 1.25 !important; }
+h2 { font-size: calc(var(--base-font-size) * 1.5) !important; line-height: 1.3 !important; }
+h3 { font-size: calc(var(--base-font-size) * 1.25) !important; line-height: 1.35 !important; }
+h4 { font-size: calc(var(--base-font-size) * 1.1) !important; line-height: 1.4 !important; }
+h5, h6 { font-size: var(--base-font-size) !important; line-height: 1.45 !important; }
+small { font-size: calc(var(--base-font-size) * 0.85) !important; line-height: 1.5 !important; }
 
 /* Explicit targeting for Markdown & AI Response wrappers */
 :host, :host *, body, html,
@@ -634,7 +646,7 @@ cat << EOF >> "$TARGET_PATH"
 
 // Antigravity Deep UI Patcher - Frame & Webview Level Interceptor
 try {
-    const { app: electronApp, webContents } = require('electron');
+    const { app: electronApp, webContents, webFrameMain } = require('electron');
     const fs = require('fs');
 
     const coreCss = Buffer.from('${B64_CSS}', 'base64').toString('utf-8');
@@ -677,6 +689,8 @@ try {
     }
 
     const jsPayload = "(function() {\n" +
+        "  if (window.gravityHooked) return;\n" +
+        "  window.gravityHooked = true;\n" +
         "  const styleText = " + JSON.stringify(getFullCss()) + ";\n" +
         "  let sharedSheet = null;\n" +
         "  const injectedRoots = new Set();\n" +
@@ -809,8 +823,15 @@ try {
 
         contents.on('did-frame-finish-load', (event, isMainFrame, frameProcessId, frameRoutingId) => {
             contents.insertCSS(getFullCss(), { cssOrigin: 'user' }).catch(() => {});
-            if (typeof frameRoutingId !== 'undefined' && contents.executeJavaScriptInFrame) {
-                contents.executeJavaScriptInFrame(frameRoutingId, jsPayload).catch(() => {});
+            if (typeof frameRoutingId !== 'undefined' && typeof webFrameMain !== 'undefined' && webFrameMain.fromId) {
+                try {
+                    const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
+                    if (frame) {
+                        frame.executeJavaScript(jsPayload).catch(() => {});
+                    }
+                } catch(e) {
+                    contents.executeJavaScript(jsPayload).catch(() => {});
+                }
             } else {
                 contents.executeJavaScript(jsPayload).catch(() => {});
             }
@@ -820,9 +841,12 @@ try {
     console.error('Patcher runtime initiation faulted:', e);
 }
 EOF
-
+[ -f "app.asar.disabled" ] && rm -f "app.asar.disabled"
 mv "app.asar" "app.asar.disabled"
-if [ -d "app.asar.unpacked" ]; then mv "app.asar.unpacked" "app.asar.unpacked.disabled"; fi
+if [ -d "app.asar.unpacked" ]; then
+    [ -d "app.asar.unpacked.disabled" ] && rm -rf "app.asar.unpacked.disabled"
+    mv "app.asar.unpacked" "app.asar.unpacked.disabled"
+fi
 
 echo -e "  ${GREEN}✓ Core engine patched successfully.${RESET}"
 
