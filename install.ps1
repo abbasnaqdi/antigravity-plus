@@ -291,12 +291,15 @@ $CUSTOM_CSS_CONTENT
 "@
 }
 
+$B64_BYTES = [System.Text.Encoding]::UTF8.GetBytes($INJECT_CSS)
+$B64_CSS = [System.Convert]::ToBase64String($B64_BYTES)
+
 $JS_PATCH = @"
 
 // Antigravity Deep UI Patcher - Frame & Webview Level Interceptor
 try {
     const { app: electronApp } = require('electron');
-    const cssString = ``$INJECT_CSS``;
+    const cssString = Buffer.from('$B64_CSS', 'base64').toString('utf-8');
     
     const jsPayload = "(function() {\n" +
         "  const styleText = " + JSON.stringify(cssString) + ";\n" +

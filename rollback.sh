@@ -82,7 +82,7 @@ RESOLVED=false
 while [ "$RESOLVED" = false ]; do
     BASE_DIR="${BASE_DIR%/}" # Remove trailing slash if any
     
-    local path_ok=false
+    path_ok=false
     if [ "$OS_TYPE" = "Darwin" ]; then
         if [ -d "$BASE_DIR" ] && [ -d "$BASE_DIR/Contents/Resources" ]; then
             RESOURCES_DIR="$BASE_DIR/Contents/Resources"

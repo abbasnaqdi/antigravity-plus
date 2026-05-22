@@ -130,7 +130,7 @@ RESOLVED=false
 while [ "$RESOLVED" = false ]; do
     BASE_DIR="${BASE_DIR%/}" # Remove trailing slash if any
     
-    local path_ok=false
+    path_ok=false
     if [ "$OS_TYPE" = "Darwin" ]; then
         if [ -d "$BASE_DIR" ] && [ -d "$BASE_DIR/Contents/Resources" ]; then
             RESOURCES_DIR="$BASE_DIR/Contents/Resources"
@@ -636,12 +636,14 @@ $CUSTOM_CSS_CONTENT
 fi
 
 echo -e "  ${DIM}○ Compiling Omnipresent CSS payloads...${RESET}"
+B64_CSS=$(printf "%s" "$INJECT_CSS" | base64 | tr -d '\n')
+
 cat << EOF >> "$TARGET_PATH"
 
 // Antigravity Deep UI Patcher - Frame & Webview Level Interceptor
 try {
     const { app: electronApp } = require('electron');
-    const cssString = \`${INJECT_CSS}\`;
+    const cssString = Buffer.from('${B64_CSS}', 'base64').toString('utf-8');
     
     const jsPayload = "(function() {\n" +
         "  const styleText = " + JSON.stringify(cssString) + ";\n" +
