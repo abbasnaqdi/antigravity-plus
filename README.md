@@ -16,10 +16,10 @@ A layout and typography patching utility for the Antigravity desktop environment
 </p>
 
 <p align="center">
-  <img src="src/terminal_preview.png" width="85%" alt="Terminal Patcher Preview" />
+  <img src="src/terminal_preview.png?v=1.1" width="85%" alt="Terminal Patcher Preview" />
 </p>
 <p align="center">
-  <img src="src/patched_app_preview.png" width="85%" alt="Patched App UI Preview" />
+  <img src="src/patched_app_preview.png?v=1.1" width="85%" alt="Patched App UI Preview" />
 </p>
 
 ---

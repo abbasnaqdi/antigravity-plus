@@ -524,7 +524,7 @@ try {
         "  function inject(root) {\n" +
         "    if (!root) return;\n" +
         "    const id = 'gravity-shadow';\n" +
-        "    if (!root.getElementById(id)) {\n" +
+        "    if (!root.querySelector || !root.querySelector('#' + id)) {\n" +
         "      const s = document.createElement('style');\n" +
         "      s.id = id;\n" +
         "      s.textContent = styleText;\n" +
@@ -540,11 +540,35 @@ try {
         "      (document.head || document.documentElement).appendChild(s);\n" +
         "    }\n" +
         "  }\n" +
+        "  function observeIframe(iframe) {\n" +
+        "    try {\n" +
+        "      const doc = iframe.contentDocument || iframe.contentWindow.document;\n" +
+        "      if (doc && !doc.gravityHooked) {\n" +
+        "        doc.gravityHooked = true;\n" +
+        "        inject(doc.head || doc.documentElement);\n" +
+        "        pierce(doc.documentElement);\n" +
+        "        const obs = new MutationObserver((mutations) => {\n" +
+        "          for (const mutation of mutations) {\n" +
+        "            for (const added of mutation.addedNodes) {\n" +
+        "              if (added.nodeType === 1) {\n" +
+        "                pierce(added);\n" +
+        "              }\n" +
+        "            }\n" +
+        "          }\n" +
+        "        });\n" +
+        "        obs.observe(doc.documentElement, { childList: true, subtree: true });\n" +
+        "      }\n" +
+        "    } catch(e) {}\n" +
+        "  }\n" +
         "  function pierce(node) {\n" +
         "    if (!node) return;\n" +
         "    if (node.shadowRoot) {\n" +
         "      inject(node.shadowRoot);\n" +
         "      pierce(node.shadowRoot);\n" +
+        "    }\n" +
+        "    if (node.tagName === 'IFRAME') {\n" +
+        "      observeIframe(node);\n" +
+        "      node.addEventListener('load', () => observeIframe(node));\n" +
         "    }\n" +
         "    if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') {\n" +
         "      if (node.getAttribute('dir') !== 'auto') {\n" +
@@ -656,9 +680,12 @@ if [ "$RESTART_APP" = true ]; then
     
     # Robust launch mechanism mapping user session bus securely
     if [ "$EUID" -eq 0 ]; then
-        sudo -H -u "$REAL_USER" bash -c "export DISPLAY=\"$DISPLAY\"; export WAYLAND_DISPLAY=\"$WAYLAND_DISPLAY\"; export XDG_RUNTIME_DIR=\"/run/user/$REAL_UID\"; export DBUS_SESSION_BUS_ADDRESS=\"$DBUS_PATH\"; nohup \"$BASE_DIR/antigravity\" >/dev/null 2>&1 &"
+        [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+        [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+        
+        sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
     else
-        bash -c "nohup \"$BASE_DIR/antigravity\" >/dev/null 2>&1 &"
+        nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
     fi
 else
     echo -e " ${GREEN}✔ Complete:${RESET} Pipeline finished. Launch Antigravity manually to verify."

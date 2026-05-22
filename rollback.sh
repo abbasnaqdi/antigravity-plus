@@ -163,9 +163,12 @@ if [ "$RESTART_APP" = true ]; then
     echo -e "${GRAY}──────────────────────────────────────────────────────────${RESET}\n"
     
     if [ "$EUID" -eq 0 ]; then
-        sudo -H -u "$REAL_USER" bash -c "export DISPLAY=\"$DISPLAY\"; export WAYLAND_DISPLAY=\"$WAYLAND_DISPLAY\"; export XDG_RUNTIME_DIR=\"/run/user/$REAL_UID\"; export DBUS_SESSION_BUS_ADDRESS=\"$DBUS_PATH\"; nohup \"$BASE_DIR/antigravity\" >/dev/null 2>&1 &"
+        [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+        [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+        
+        sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
     else
-        bash -c "nohup \"$BASE_DIR/antigravity\" >/dev/null 2>&1 &"
+        nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
     fi
 else
     echo -e " ${GREEN}✔ Complete:${RESET} Pipeline finished. Launch Antigravity manually to verify."
