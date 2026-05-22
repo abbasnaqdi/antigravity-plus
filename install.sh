@@ -456,6 +456,7 @@ verify_and_install_fonts "$INPUT_MONO"
 CUSTOM_CSS_CONTENT=""
 if [ -n "$CUSTOM_CSS_PATH" ]; then
     CUSTOM_CSS_PATH="${CUSTOM_CSS_PATH/#\~/$USER_HOME}"
+    CUSTOM_CSS_PATH=$(realpath "$CUSTOM_CSS_PATH" 2>/dev/null || readlink -f "$CUSTOM_CSS_PATH" 2>/dev/null || echo "$CUSTOM_CSS_PATH")
     if [ -f "$CUSTOM_CSS_PATH" ]; then
         CUSTOM_CSS_CONTENT=$(cat "$CUSTOM_CSS_PATH")
         echo -e "  ${GREEN}✓ Loaded Custom CSS from:${RESET} $CUSTOM_CSS_PATH (${#CUSTOM_CSS_CONTENT} characters)"
@@ -626,15 +627,6 @@ textarea, select,
 ::-webkit-scrollbar-thumb:hover { background: rgba(120, 120, 120, 0.5) !important; }
 "
 
-if [ -n "$CUSTOM_CSS_CONTENT" ]; then
-    INJECT_CSS="
-$INJECT_CSS
-
-/* --- Custom User CSS Styles --- */
-$CUSTOM_CSS_CONTENT
-"
-fi
-
 echo -e "  ${DIM}○ Compiling Omnipresent CSS payloads...${RESET}"
 B64_CSS=$(printf "%s" "$INJECT_CSS" | base64 | tr -d '\n')
 
@@ -642,12 +634,52 @@ cat << EOF >> "$TARGET_PATH"
 
 // Antigravity Deep UI Patcher - Frame & Webview Level Interceptor
 try {
-    const { app: electronApp } = require('electron');
-    const cssString = Buffer.from('${B64_CSS}', 'base64').toString('utf-8');
-    
+    const { app: electronApp, webContents } = require('electron');
+    const fs = require('fs');
+
+    const coreCss = Buffer.from('${B64_CSS}', 'base64').toString('utf-8');
+    const customCssPath = '${CUSTOM_CSS_PATH}';
+    let currentCustomCss = '';
+
+    if (customCssPath && fs.existsSync(customCssPath)) {
+        try {
+            currentCustomCss = fs.readFileSync(customCssPath, 'utf8');
+        } catch(e) {}
+    }
+
+    function getFullCss() {
+        return coreCss + '\n/* --- Custom User CSS Styles --- */\n' + currentCustomCss;
+    }
+
+    function broadcastStyleUpdate() {
+        const fullCss = getFullCss();
+        for (const wc of webContents.getAllWebContents()) {
+            try {
+                wc.insertCSS(fullCss, { cssOrigin: 'user' }).catch(() => {});
+                wc.executeJavaScript("if (typeof window !== 'undefined' && window.updateGravityStyles) window.updateGravityStyles(" + JSON.stringify(fullCss) + ");").catch(() => {});
+            } catch(e) {}
+        }
+    }
+
+    if (customCssPath && fs.existsSync(customCssPath)) {
+        let watchTimeout;
+        fs.watch(customCssPath, (eventType) => {
+            if (eventType === 'change') {
+                clearTimeout(watchTimeout);
+                watchTimeout = setTimeout(() => {
+                    try {
+                        currentCustomCss = fs.readFileSync(customCssPath, 'utf8');
+                        broadcastStyleUpdate();
+                    } catch(e) {}
+                }, 250);
+            }
+        });
+    }
+
     const jsPayload = "(function() {\n" +
-        "  const styleText = " + JSON.stringify(cssString) + ";\n" +
+        "  const styleText = " + JSON.stringify(getFullCss()) + ";\n" +
         "  let sharedSheet = null;\n" +
+        "  const injectedRoots = new Set();\n" +
         "  try {\n" +
         "    sharedSheet = new CSSStyleSheet();\n" +
         "    sharedSheet.replaceSync(styleText);\n" +
@@ -655,6 +687,7 @@ try {
         "  function inject(root) {\n" +
         "    if (!root) return;\n" +
         "    const id = 'gravity-shadow';\n" +
+        "    injectedRoots.add(root);\n" +
         "    if (sharedSheet && root.adoptedStyleSheets) {\n" +
         "      try {\n" +
         "        if (!root.adoptedStyleSheets.includes(sharedSheet)) {\n" +
@@ -675,6 +708,17 @@ try {
         "      root.appendChild(s);\n" +
         "    }\n" +
         "  }\n" +
+        "  window.updateGravityStyles = function(newCss) {\n" +
+        "    if (sharedSheet) {\n" +
+        "      try { sharedSheet.replaceSync(newCss); } catch(e) {}\n" +
+        "    }\n" +
+        "    for (const root of injectedRoots) {\n" +
+        "      try {\n" +
+        "        const s = root.querySelector('#gravity-shadow');\n" +
+        "        if (s) s.textContent = newCss;\n" +
+        "      } catch(e) { injectedRoots.delete(root); }\n" +
+        "    }\n" +
+        "  };\n" +
         "  if (document.head || document.documentElement) {\n" +
         "    inject(document);\n" +
         "  }\n" +
@@ -703,6 +747,14 @@ try {
         "    if (node.shadowRoot) {\n" +
         "      inject(node.shadowRoot);\n" +
         "      pierce(node.shadowRoot);\n" +
+        "      const obs = new MutationObserver((mutations) => {\n" +
+        "        for (const mutation of mutations) {\n" +
+        "          for (const added of mutation.addedNodes) {\n" +
+        "            if (added.nodeType === 1) pierce(added);\n" +
+        "          }\n" +
+        "        }\n" +
+        "      });\n" +
+        "      obs.observe(node.shadowRoot, { childList: true, subtree: true });\n" +
         "    }\n" +
         "    if (node.tagName === 'IFRAME') {\n" +
         "      observeIframe(node);\n" +
@@ -751,12 +803,12 @@ try {
 
     electronApp.on('web-contents-created', (createEvent, contents) => {
         contents.on('dom-ready', () => {
-            contents.insertCSS(cssString, { cssOrigin: 'user' }).catch(() => {});
+            contents.insertCSS(getFullCss(), { cssOrigin: 'user' }).catch(() => {});
             contents.executeJavaScript(jsPayload).catch(() => {});
         });
 
         contents.on('did-frame-finish-load', (event, isMainFrame, frameProcessId, frameRoutingId) => {
-            contents.insertCSS(cssString, { cssOrigin: 'user' }).catch(() => {});
+            contents.insertCSS(getFullCss(), { cssOrigin: 'user' }).catch(() => {});
             if (typeof frameRoutingId !== 'undefined' && contents.executeJavaScriptInFrame) {
                 contents.executeJavaScriptInFrame(frameRoutingId, jsPayload).catch(() => {});
             } else {
