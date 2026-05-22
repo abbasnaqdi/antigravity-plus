@@ -19,8 +19,29 @@ echo -e "${GRAY}─────────────────────�
 
 # 1. Smart Directory Discovery Engine
 echo -e "\n${CYAN}◆ Locating Deployment Directory:${RESET}"
-echo -e "  ${DIM}Scanning for Antigravity installation under /opt...${RESET}"
-PATHS=($(find /opt -maxdepth 2 -type d -iname "*antigravity*" 2>/dev/null || true))
+OS_TYPE=$(uname -s)
+PATHS=()
+
+if [ "$OS_TYPE" = "Darwin" ]; then
+    echo -e "  ${DIM}Scanning for Antigravity installation under /Applications...${RESET}"
+    if [ -d "/Applications/Antigravity.app" ]; then
+        PATHS+=("/Applications/Antigravity.app")
+    fi
+    REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || whoami)}"
+    USER_HOME=$(eval echo "~$REAL_USER")
+    if [ -d "$USER_HOME/Applications/Antigravity.app" ]; then
+        PATHS+=("$USER_HOME/Applications/Antigravity.app")
+    fi
+    if [ ${#PATHS[@]} -eq 0 ]; then
+        FIND_PATHS=($(find /Applications "$USER_HOME/Applications" -maxdepth 2 -type d -iname "*antigravity*.app" 2>/dev/null || true))
+        for p in "${FIND_PATHS[@]}"; do
+            PATHS+=("$p")
+        done
+    fi
+else
+    echo -e "  ${DIM}Scanning for Antigravity installation under /opt...${RESET}"
+    PATHS=($(find /opt -maxdepth 2 -type d -iname "*antigravity*" 2>/dev/null || true))
+fi
 
 PROPOSED_DIR=""
 if [ ${#PATHS[@]} -eq 1 ]; then
@@ -61,11 +82,25 @@ RESOLVED=false
 while [ "$RESOLVED" = false ]; do
     BASE_DIR="${BASE_DIR%/}" # Remove trailing slash if any
     
-    if [ -n "$BASE_DIR" ] && [ -d "$BASE_DIR" ] && ( [ -f "$BASE_DIR/antigravity" ] || [ -f "$BASE_DIR/Antigravity" ] ); then
-        RESOURCES_DIR="$BASE_DIR/resources"
-        if [ -d "$RESOURCES_DIR" ] && ( [ -f "$RESOURCES_DIR/app.asar.bak" ] || [ -f "$RESOURCES_DIR/app.asar" ] ); then
-            RESOLVED=true
-        else
+    local path_ok=false
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if [ -d "$BASE_DIR" ] && [ -d "$BASE_DIR/Contents/Resources" ]; then
+            RESOURCES_DIR="$BASE_DIR/Contents/Resources"
+            path_ok=true
+        fi
+    else
+        if [ -n "$BASE_DIR" ] && [ -d "$BASE_DIR" ] && ( [ -f "$BASE_DIR/antigravity" ] || [ -f "$BASE_DIR/Antigravity" ] ); then
+            RESOURCES_DIR="$BASE_DIR/resources"
+            if [ -d "$RESOURCES_DIR" ] && ( [ -f "$RESOURCES_DIR/app.asar.bak" ] || [ -f "$RESOURCES_DIR/app.asar" ] ); then
+                path_ok=true
+            fi
+        fi
+    fi
+
+    if [ "$path_ok" = true ]; then
+        RESOLVED=true
+    else
+        if [ -d "$BASE_DIR" ]; then
             ASAR_PATH=$(find "$BASE_DIR" -name "app.asar" -o -name "app.asar.bak" 2>/dev/null | head -n 1)
             if [ -n "$ASAR_PATH" ]; then
                 RESOURCES_DIR=$(dirname "$ASAR_PATH")
@@ -145,15 +180,29 @@ USER_HOME=$(eval echo "~$REAL_USER")
 DBUS_PATH="unix:path=/run/user/$REAL_UID/bus"
 
 RESTART_APP=false
-if pkill -0 -f antigravity 2>/dev/null; then
-    echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
-    echo -ne "  Do you want to restart it now to verify the restoration? [Y/n] (default: Y): "
-    read -r chk_kill
-    chk_kill=${chk_kill:-Y}
-    if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
-        RESTART_APP=true
-        pkill -f antigravity || true
-        sleep 1
+if [ "$OS_TYPE" = "Darwin" ]; then
+    if pgrep -x "Antigravity" &>/dev/null || pgrep -f "Antigravity.app" &>/dev/null; then
+        echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
+        echo -ne "  Do you want to restart it now to verify the restoration? [Y/n] (default: Y): "
+        read -r chk_kill
+        chk_kill=${chk_kill:-Y}
+        if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
+            RESTART_APP=true
+            pkill -f "Antigravity" || killall "Antigravity" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+else
+    if pkill -0 -f antigravity 2>/dev/null; then
+        echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
+        echo -ne "  Do you want to restart it now to verify the restoration? [Y/n] (default: Y): "
+        read -r chk_kill
+        chk_kill=${chk_kill:-Y}
+        if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
+            RESTART_APP=true
+            pkill -f antigravity || true
+            sleep 1
+        fi
     fi
 fi
 
@@ -162,13 +211,21 @@ if [ "$RESTART_APP" = true ]; then
     echo -e " ${GREEN}✔ Complete:${RESET} Relaunching default Antigravity..."
     echo -e "${GRAY}──────────────────────────────────────────────────────────${RESET}\n"
     
-    if [ "$EUID" -eq 0 ]; then
-        [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
-        [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
-        
-        sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ]; then
+            sudo -u "$REAL_USER" open -a Antigravity
+        else
+            open -a Antigravity
+        fi
     else
-        nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        if [ "$EUID" -eq 0 ]; then
+            [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+            [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+            
+            sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        else
+            nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        fi
     fi
 else
     echo -e " ${GREEN}✔ Complete:${RESET} Pipeline finished. Launch Antigravity manually to verify."

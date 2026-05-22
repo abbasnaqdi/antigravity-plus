@@ -38,6 +38,7 @@ A layout and typography patching utility for the Antigravity desktop environment
 
 ## Quick Start Guide
 
+### Linux
 Verified on **Ubuntu 26.04 LTS** (supports any Debian/Ubuntu-based system, download the client from [antigravity.google](https://antigravity.google)).
 
 ```bash
@@ -49,10 +50,35 @@ chmod +x install.sh
 ```
 *Note: Sudo privileges are only requested if the application is installed in system-protected folders (like `/opt`).*
 
+### macOS
+Supports macOS (Apple Silicon & Intel). The patcher dynamically detects macOS, resolves the application bundle path, and installs custom fonts via Homebrew.
+
+```bash
+# 1. Grant execution permissions
+chmod +x install.sh
+
+# 2. Run the patcher
+./install.sh
+```
+
+### Windows (Experimental)
+> [!WARNING]
+> **Untested Platform**: The Windows version of this patcher (`install.ps1` and `rollback.ps1`) is **untested**. Use at your own risk. Ensure you have backed up any critical data before running.
+
+Run the patcher in PowerShell (run PowerShell as Administrator if Antigravity is installed in `C:\Program Files`):
+```powershell
+# 1. Bypass script execution policy for the current process
+Set-ExecutionPolicy Bypass -Scope Process -Force
+
+# 2. Run the patcher script
+.\install.ps1
+```
+
 ---
 
 ## Rollback & Uninstall
 
+### Linux
 To revert back to the original layout:
 ```bash
 # Grant execution permissions
@@ -60,6 +86,26 @@ chmod +x rollback.sh
 
 # Run the rollback utility
 ./rollback.sh
+```
+
+### macOS
+To revert back to the original layout:
+```bash
+# Grant execution permissions
+chmod +x rollback.sh
+
+# Run the rollback utility
+./rollback.sh
+```
+
+### Windows (Experimental)
+To revert back to the original layout (run PowerShell as Administrator if needed):
+```powershell
+# 1. Bypass script execution policy for the current process
+Set-ExecutionPolicy Bypass -Scope Process -Force
+
+# 2. Run the rollback utility
+.\rollback.ps1
 ```
 
 ---

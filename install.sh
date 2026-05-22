@@ -18,9 +18,13 @@ echo -e " ${DIM}Deep Shadow-DOM CSS Injector & Typographic Engine${RESET}"
 echo -e "${GRAY}──────────────────────────────────────────────────────────${RESET}"
 
 # OS compatibility & dependencies pre-flight checks
+OS_TYPE=$(uname -s)
+
 check_compatibility() {
     local os_ok=false
-    if command -v apt-get &>/dev/null; then
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        os_ok=true
+    elif command -v apt-get &>/dev/null; then
         os_ok=true
     elif [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -30,14 +34,14 @@ check_compatibility() {
     fi
 
     local deps_ok=true
-    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null || ! command -v asar &>/dev/null; then
+    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
         deps_ok=false
     fi
 
     if [ "$os_ok" = false ]; then
         if [ "$deps_ok" = true ]; then
             echo -e "  ${YELLOW}⚠ Warning: Your operating system is not Debian/Ubuntu-based.${RESET}"
-            echo -e "             Proceeding since all dependencies (Node.js, npm, asar) are already installed.\n"
+            echo -e "             Proceeding since all dependencies (Node.js, npm) are already installed.\n"
         else
             local os_name="Unknown Linux"
             if [ -f /etc/os-release ]; then
@@ -49,18 +53,43 @@ check_compatibility() {
             echo -e "  To run this patcher on your system, please manually install the following packages:"
             echo -e "    - Node.js"
             echo -e "    - npm"
-            echo -e "    - asar (npm install -g asar)"
             echo -e "  After installing them, run this script again.\n"
             exit 1
         fi
+    elif [ "$os_ok" = true ] && [ "$deps_ok" = false ] && [ "$OS_TYPE" = "Darwin" ]; then
+        echo -e "\n${YELLOW}𐄂 Error: Missing Dependencies${RESET}"
+        echo -e "  To run this patcher on macOS, please manually install the following packages:"
+        echo -e "    - Node.js & npm (via https://nodejs.org/ or 'brew install node')"
+        echo -e "  After installing them, run this script again.\n"
+        exit 1
     fi
 }
 check_compatibility
 
 # 1. Smart Directory Discovery Engine
 echo -e "\n${CYAN}◆ Locating Deployment Directory:${RESET}"
-echo -e "  ${DIM}Scanning for Antigravity installation under /opt...${RESET}"
-PATHS=($(find /opt -maxdepth 2 -type d -iname "*antigravity*" 2>/dev/null || true))
+PATHS=()
+
+if [ "$OS_TYPE" = "Darwin" ]; then
+    echo -e "  ${DIM}Scanning for Antigravity installation under /Applications...${RESET}"
+    if [ -d "/Applications/Antigravity.app" ]; then
+        PATHS+=("/Applications/Antigravity.app")
+    fi
+    REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || whoami)}"
+    USER_HOME=$(eval echo "~$REAL_USER")
+    if [ -d "$USER_HOME/Applications/Antigravity.app" ]; then
+        PATHS+=("$USER_HOME/Applications/Antigravity.app")
+    fi
+    if [ ${#PATHS[@]} -eq 0 ]; then
+        FIND_PATHS=($(find /Applications "$USER_HOME/Applications" -maxdepth 2 -type d -iname "*antigravity*.app" 2>/dev/null || true))
+        for p in "${FIND_PATHS[@]}"; do
+            PATHS+=("$p")
+        done
+    fi
+else
+    echo -e "  ${DIM}Scanning for Antigravity installation under /opt...${RESET}"
+    PATHS=($(find /opt -maxdepth 2 -type d -iname "*antigravity*" 2>/dev/null || true))
+fi
 
 PROPOSED_DIR=""
 if [ ${#PATHS[@]} -eq 1 ]; then
@@ -101,11 +130,25 @@ RESOLVED=false
 while [ "$RESOLVED" = false ]; do
     BASE_DIR="${BASE_DIR%/}" # Remove trailing slash if any
     
-    if [ -n "$BASE_DIR" ] && [ -d "$BASE_DIR" ] && ( [ -f "$BASE_DIR/antigravity" ] || [ -f "$BASE_DIR/Antigravity" ] ); then
-        RESOURCES_DIR="$BASE_DIR/resources"
-        if [ -d "$RESOURCES_DIR" ] && ( [ -f "$RESOURCES_DIR/app.asar" ] || [ -d "$RESOURCES_DIR/app" ] ); then
-            RESOLVED=true
-        else
+    local path_ok=false
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if [ -d "$BASE_DIR" ] && [ -d "$BASE_DIR/Contents/Resources" ]; then
+            RESOURCES_DIR="$BASE_DIR/Contents/Resources"
+            path_ok=true
+        fi
+    else
+        if [ -n "$BASE_DIR" ] && [ -d "$BASE_DIR" ] && ( [ -f "$BASE_DIR/antigravity" ] || [ -f "$BASE_DIR/Antigravity" ] ); then
+            RESOURCES_DIR="$BASE_DIR/resources"
+            if [ -d "$RESOURCES_DIR" ] && ( [ -f "$RESOURCES_DIR/app.asar" ] || [ -d "$RESOURCES_DIR/app" ] ); then
+                path_ok=true
+            fi
+        fi
+    fi
+
+    if [ "$path_ok" = true ]; then
+        RESOLVED=true
+    else
+        if [ -d "$BASE_DIR" ]; then
             ASAR_PATH=$(find "$BASE_DIR" -name "app.asar" 2>/dev/null | head -n 1)
             if [ -n "$ASAR_PATH" ]; then
                 RESOURCES_DIR=$(dirname "$ASAR_PATH")
@@ -141,6 +184,11 @@ DBUS_PATH="unix:path=/run/user/$REAL_UID/bus"
 # Helper: Detect system font family and size from DE settings
 detect_system_font() {
     local font=""
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        echo ".AppleSystemUIFont 12"
+        return
+    fi
+
     local desktop="${XDG_CURRENT_DESKTOP^^}"
     local cmd=""
     
@@ -178,6 +226,23 @@ detect_system_font() {
 # Helper: Check if a font family is installed
 check_font_installed() {
     local font_name="$1"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if [[ "$font_name" =~ ^(\.AppleSystemUIFont|BlinkMacSystemFont|SF Pro|Helvetica|Arial|Times|Courier|Menlo|Monaco)$ ]]; then
+            return 0
+        fi
+        if command -v fc-list &>/dev/null; then
+            if fc-list : family 2>/dev/null | cut -d: -f2 | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort -u | grep -ixq "^$font_name$"; then
+                return 0
+            fi
+        fi
+        if [ -d "/System/Library/Fonts" ] || [ -d "/Library/Fonts" ]; then
+            if find "/System/Library/Fonts" "/Library/Fonts" "$USER_HOME/Library/Fonts" -name "*$font_name*" -maxdepth 2 2>/dev/null | grep -q .; then
+                return 0
+            fi
+        fi
+        return 1
+    fi
+
     if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ]; then
         if sudo -u "$REAL_USER" fc-list : family 2>/dev/null | cut -d: -f2 | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort -u | grep -ixq "^$font_name$"; then
             return 0
@@ -223,6 +288,22 @@ map_font_to_apt() {
     esac
 }
 
+# Helper: Map generic font family to Homebrew cask name
+map_font_to_brew() {
+    local font_name="${1,,}"
+    case "$font_name" in
+        "vazirmatn"|"vazir") echo "font-vazirmatn" ;;
+        "jetbrains mono"|"jetbrains") echo "font-jetbrains-mono" ;;
+        "inter") echo "font-inter" ;;
+        "fira code"|"firacode") echo "font-fira-code" ;;
+        "hack") echo "font-hack" ;;
+        "ubuntu") echo "font-ubuntu" ;;
+        "ubuntu mono") echo "font-ubuntu-mono" ;;
+        "noto sans"|"notosans") echo "font-noto-sans" ;;
+        *) echo "" ;;
+    esac
+}
+
 # Helper: Ask user to install font package via apt
 install_font_via_apt() {
     local pkg="$1"
@@ -240,6 +321,23 @@ install_font_via_apt() {
     fi
 }
 
+# Helper: Ask user to install font via Homebrew
+install_font_via_brew() {
+    local pkg="$1"
+    echo -e "    ${YELLOW}⚠ Font cask '$pkg' is available via Homebrew but not installed.${RESET}"
+    echo -ne "    Would you like to install '$pkg' using Homebrew? [Y/n] (default: Y): "
+    read -r opt
+    opt=${opt:-Y}
+    if [[ "$opt" =~ ^[Yy]$ ]]; then
+        brew tap homebrew/cask-fonts 2>/dev/null || true
+        if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ]; then
+            sudo -u "$REAL_USER" brew install --cask "$pkg"
+        else
+            brew install --cask "$pkg"
+        fi
+    fi
+}
+
 # Helper: Verify list of fonts
 verify_and_install_fonts() {
     local font_input="$1"
@@ -253,11 +351,24 @@ verify_and_install_fonts() {
                 echo -e " ${GREEN}installed${RESET}"
             else
                 echo -e " ${YELLOW}not found${RESET}"
-                local apt_pkg=$(map_font_to_apt "$font_name")
-                if [ -n "$apt_pkg" ]; then
-                    install_font_via_apt "$apt_pkg"
+                if [ "$OS_TYPE" = "Darwin" ]; then
+                    local brew_pkg=$(map_font_to_brew "$font_name")
+                    if [ -n "$brew_pkg" ]; then
+                        if command -v brew &>/dev/null; then
+                            install_font_via_brew "$brew_pkg"
+                        else
+                            echo -e "    ${DIM}Homebrew not found. Please install the '$font_name' font manually.${RESET}"
+                        fi
+                    else
+                        echo -e "    ${DIM}No matching Homebrew cask found for '$font_name'.${RESET}"
+                    fi
                 else
-                    echo -e "    ${DIM}No matching apt package found for '$font_name'.${RESET}"
+                    local apt_pkg=$(map_font_to_apt "$font_name")
+                    if [ -n "$apt_pkg" ]; then
+                        install_font_via_apt "$apt_pkg"
+                    else
+                        echo -e "    ${DIM}No matching apt package found for '$font_name'.${RESET}"
+                    fi
                 fi
             fi
         fi
@@ -401,21 +512,31 @@ fi
 echo -e "\n${CYAN}◆ Execution Phase:${RESET}"
 
 if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "\n${YELLOW}𐄂 Error: Node.js and npm are missing. Please run the script as root (sudo) once to install them.${RESET}\n"
-        exit 1
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if command -v brew &>/dev/null; then
+            echo -e "  ${DIM}○ Installing missing Node.js via Homebrew...${RESET}"
+            if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ]; then
+                sudo -u "$REAL_USER" brew install node
+            else
+                brew install node
+            fi
+        else
+            echo -e "\n${YELLOW}𐄂 Error: Node.js and npm are missing. Please install them manually or install Homebrew first.${RESET}\n"
+            exit 1
+        fi
+    else
+        if [ "$EUID" -ne 0 ]; then
+            echo -e "\n${YELLOW}𐄂 Error: Node.js and npm are missing. Please run the script as root (sudo) once to install them.${RESET}\n"
+            exit 1
+        fi
+        echo -e "  ${DIM}○ Installing missing Node.js dependencies...${RESET}"
+        apt-get update && apt-get install -y nodejs npm
     fi
-    echo -e "  ${DIM}○ Installing missing Node.js dependencies...${RESET}"
-    apt-get update && apt-get install -y nodejs npm
 fi
 
-if ! command -v asar &> /dev/null; then
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "\n${YELLOW}𐄂 Error: 'asar' utility is missing. Please run the script as root (sudo) once to install it.${RESET}\n"
-        exit 1
-    fi
-    echo -e "  ${DIM}○ Deploying Asar utility...${RESET}"
-    npm install -g asar
+ASAR_CMD="asar"
+if ! command -v asar &>/dev/null; then
+    ASAR_CMD="npx --yes asar"
 fi
 
 echo -e "  ${DIM}○ Synchronizing backups & extracting resources...${RESET}"
@@ -431,7 +552,7 @@ else
 fi
 
 rm -rf app
-asar extract "app.asar" app
+$ASAR_CMD extract "app.asar" app
 
 MAIN_FILE=$(node -e "try { console.log(require('./app/package.json').main || 'index.js'); } catch(e) { console.log('index.js'); }")
 TARGET_PATH="app/$MAIN_FILE"
@@ -470,8 +591,11 @@ ${BIDI_OPTS}
 }
 
 /* Explicit targeting for Markdown & AI Response wrappers */
+:host, :host *, body, html,
+p, span, div, li, a, h1, h2, h3, h4, h5, h6,
 .prose, .prose *, .markdown-body, .markdown-body *, .message, .message *, 
-.content, .content *, [class*='markdown'], [class*='message'], [class*='response'] {
+.content, .content *, [class*='markdown'], [class*='message'], [class*='response'],
+[class*='text'], [class*='bubble'], [class*='chat'] {
     font-family: ${UI_FONT} !important;
 }
 
@@ -521,9 +645,27 @@ try {
     
     const jsPayload = "(function() {\n" +
         "  const styleText = " + JSON.stringify(cssString) + ";\n" +
+        "  let sharedSheet = null;\n" +
+        "  try {\n" +
+        "    sharedSheet = new CSSStyleSheet();\n" +
+        "    sharedSheet.replaceSync(styleText);\n" +
+        "  } catch(e) {}\n" +
         "  function inject(root) {\n" +
         "    if (!root) return;\n" +
         "    const id = 'gravity-shadow';\n" +
+        "    if (sharedSheet && root.adoptedStyleSheets) {\n" +
+        "      try {\n" +
+        "        if (!root.adoptedStyleSheets.includes(sharedSheet)) {\n" +
+        "          root.adoptedStyleSheets = [...root.adoptedStyleSheets, sharedSheet];\n" +
+        "        }\n" +
+        "      } catch(err) {\n" +
+        "        fallbackInject(root, id);\n" +
+        "      }\n" +
+        "    } else {\n" +
+        "      fallbackInject(root, id);\n" +
+        "    }\n" +
+        "  }\n" +
+        "  function fallbackInject(root, id) {\n" +
         "    if (!root.querySelector || !root.querySelector('#' + id)) {\n" +
         "      const s = document.createElement('style');\n" +
         "      s.id = id;\n" +
@@ -532,20 +674,14 @@ try {
         "    }\n" +
         "  }\n" +
         "  if (document.head || document.documentElement) {\n" +
-        "    const id = 'gravity-main-style';\n" +
-        "    if (!document.getElementById(id)) {\n" +
-        "      const s = document.createElement('style');\n" +
-        "      s.id = id;\n" +
-        "      s.textContent = styleText;\n" +
-        "      (document.head || document.documentElement).appendChild(s);\n" +
-        "    }\n" +
+        "    inject(document);\n" +
         "  }\n" +
         "  function observeIframe(iframe) {\n" +
         "    try {\n" +
         "      const doc = iframe.contentDocument || iframe.contentWindow.document;\n" +
         "      if (doc && !doc.gravityHooked) {\n" +
         "        doc.gravityHooked = true;\n" +
-        "        inject(doc.head || doc.documentElement);\n" +
+        "        inject(doc);\n" +
         "        pierce(doc.documentElement);\n" +
         "        const obs = new MutationObserver((mutations) => {\n" +
         "          for (const mutation of mutations) {\n" +
@@ -661,15 +797,29 @@ fi
 
 # 6. Final cycle state wrap-up
 RESTART_APP=false
-if pkill -0 -f antigravity 2>/dev/null; then
-    echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
-    echo -ne "  Do you want to restart it now to apply the patch? [Y/n] (default: Y): "
-    read -r chk_kill
-    chk_kill=${chk_kill:-Y}
-    if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
-        RESTART_APP=true
-        pkill -f antigravity || true
-        sleep 1
+if [ "$OS_TYPE" = "Darwin" ]; then
+    if pgrep -x "Antigravity" &>/dev/null || pgrep -f "Antigravity.app" &>/dev/null; then
+        echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
+        echo -ne "  Do you want to restart it now to apply the patch? [Y/n] (default: Y): "
+        read -r chk_kill
+        chk_kill=${chk_kill:-Y}
+        if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
+            RESTART_APP=true
+            pkill -f "Antigravity" || killall "Antigravity" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+else
+    if pkill -0 -f antigravity 2>/dev/null; then
+        echo -e "\n${CYAN}◆ Process Detection:${RESET} Antigravity is currently active."
+        echo -ne "  Do you want to restart it now to apply the patch? [Y/n] (default: Y): "
+        read -r chk_kill
+        chk_kill=${chk_kill:-Y}
+        if [[ "$chk_kill" =~ ^[Yy]$ ]]; then
+            RESTART_APP=true
+            pkill -f antigravity || true
+            sleep 1
+        fi
     fi
 fi
 
@@ -678,14 +828,22 @@ if [ "$RESTART_APP" = true ]; then
     echo -e " ${GREEN}✔ Complete:${RESET} Relaunching Antigravity..."
     echo -e "${GRAY}──────────────────────────────────────────────────────────${RESET}\n"
     
-    # Robust launch mechanism mapping user session bus securely
-    if [ "$EUID" -eq 0 ]; then
-        [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
-        [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
-        
-        sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        if [ "$EUID" -eq 0 ] && [ -n "$REAL_USER" ]; then
+            sudo -u "$REAL_USER" open -a Antigravity
+        else
+            open -a Antigravity
+        fi
     else
-        nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        # Robust launch mechanism mapping user session bus securely
+        if [ "$EUID" -eq 0 ]; then
+            [ -z "$DISPLAY" ] && DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+            [ -z "$WAYLAND_DISPLAY" ] && WAYLAND_DISPLAY=$(find /proc -maxdepth 2 -user "$REAL_USER" -name environ -exec grep -z '^WAYLAND_DISPLAY=' {} + 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\0')
+            
+            sudo -u "$REAL_USER" -i env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        else
+            nohup "$BASE_DIR/antigravity" >/dev/null 2>&1 &
+        fi
     fi
 else
     echo -e " ${GREEN}✔ Complete:${RESET} Pipeline finished. Launch Antigravity manually to verify."
