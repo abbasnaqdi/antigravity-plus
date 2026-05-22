@@ -12,6 +12,10 @@ A layout and typography patching utility for the Antigravity desktop environment
 </p>
 
 <p align="center">
+  🚀 <b>Help this project grow!</b> If Antigravity Plus improved your layout, please drop a ⭐ on GitHub!
+</p>
+
+<p align="center">
   <img src="src/terminal_preview.png" width="85%" alt="Terminal Patcher Preview" />
 </p>
 <p align="center">
@@ -67,6 +71,14 @@ chmod +x rollback.sh
     <img src="https://api.star-history.com/svg?repos=abbasnaqdi/antigravity-plus&type=Date" width="85%" alt="Star History Chart">
   </a>
 </p>
+
+---
+
+## Contributing
+
+Contributions of all kinds are welcome! Whether you are reporting a bug, proposing a new feature, or submitting a Pull Request, feel free to open an issue or pull request.
+
+Check out our [good first issues](https://github.com/abbasnaqdi/antigravity-plus/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) to get started!
 
 ---
 
