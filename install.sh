@@ -584,24 +584,22 @@ INJECT_CSS="
 }
 
 ${BIDI_OPTS}
-
 * {
     font-family: ${UI_FONT} !important;
+    font-size: var(--base-font-size) !important;
+    line-height: 1.65 !important;
     letter-spacing: -0.01em !important;
     ${SMOOTHING_OPTS}
 }
 
-body, html, p, span, div, li, a, input, textarea, select, button, label {
-    font-size: var(--base-font-size) !important;
-    line-height: 1.65 !important;
-}
-
-h1 { font-size: calc(var(--base-font-size) * 2) !important; line-height: 1.25 !important; }
-h2 { font-size: calc(var(--base-font-size) * 1.5) !important; line-height: 1.3 !important; }
-h3 { font-size: calc(var(--base-font-size) * 1.25) !important; line-height: 1.35 !important; }
-h4 { font-size: calc(var(--base-font-size) * 1.1) !important; line-height: 1.4 !important; }
-h5, h6 { font-size: var(--base-font-size) !important; line-height: 1.45 !important; }
-small { font-size: calc(var(--base-font-size) * 0.85) !important; line-height: 1.5 !important; }
+/* Header & Small text scaling (including descendants) */
+h1, h1 * { font-size: calc(var(--base-font-size) * 2) !important; line-height: 1.25 !important; }
+h2, h2 * { font-size: calc(var(--base-font-size) * 1.5) !important; line-height: 1.3 !important; }
+h3, h3 * { font-size: calc(var(--base-font-size) * 1.25) !important; line-height: 1.35 !important; }
+h4, h4 * { font-size: calc(var(--base-font-size) * 1.1) !important; line-height: 1.4 !important; }
+h5, h5 *, h6, h6 * { font-size: var(--base-font-size) !important; line-height: 1.45 !important; }
+small, small * { font-size: calc(var(--base-font-size) * 0.85) !important; line-height: 1.5 !important; }
+sub, sub *, sup, sup * { font-size: calc(var(--base-font-size) * 0.75) !important; line-height: 0 !important; }
 
 /* Explicit targeting for Markdown & AI Response wrappers */
 :host, :host *, body, html,
