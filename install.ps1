@@ -138,7 +138,7 @@ if ($CUSTOM_CSS_PATH -ne "") {
 # Clean and format font stacks for CSS
 $UI_FONT = ""
 foreach ($font in $INPUT_UI.Split(',')) {
-    $f = $font.Trim()
+    $f = $font.Trim().Trim("`"").Trim("'")
     if ($f -ne "") {
         if ($UI_FONT -eq "") { $UI_FONT = "'$f'" } else { $UI_FONT = "$UI_FONT, '$f'" }
     }
@@ -219,7 +219,7 @@ $TARGET_PATH = "$RESOURCES_DIR\app\$MAIN_FILE"
 
 $BIDI_OPTS = ""
 if ($INPUT_BIDI -match "^[Yy]$") {
-    $BIDI_OPTS = "body, p, span, div, h1, h2, h3, h4, h5, h6, li, input, textarea, section, article, td, th, a, label { unicode-bidi: plaintext !important; text-align: start !important; }"
+    $BIDI_OPTS = "html :where(p, li, dt, dd, td, th, blockquote, figcaption, caption, h1, h2, h3, h4, h5, h6, div, span, [contenteditable]):not(:where(pre, code, kbd, samp, tt, pre *, code *)) { unicode-bidi: plaintext !important; } html :where(p, li, dt, dd, td, th, blockquote, figcaption, caption, h1, h2, h3, h4, h5, h6, [contenteditable]):not(:where(pre, code, kbd, samp, tt)) { text-align: start !important; } input:not([type='password']):not([type='email']), textarea { unicode-bidi: plaintext !important; text-align: start !important; }"
 }
 
 $SMOOTHING_OPTS = ""
@@ -229,10 +229,7 @@ if ($INPUT_SMOOTH -match "^[Yy]$") {
 
 $INJECT_CSS = @"
 :root {
-    --font-family: $UI_FONT !important;
-    --default-font: $UI_FONT !important;
-    --font-primary: $UI_FONT !important;
-    --font-sans: $UI_FONT !important;
+    --font-ui: $UI_FONT;
     --font-mono: $MONO_FONT !important;
     --code-font: $MONO_FONT !important;
     --border-radius: $($BORDER_RADIUS)px !important;
@@ -244,11 +241,17 @@ $INJECT_CSS = @"
 $BIDI_OPTS
 
 * {
-    font-family: $UI_FONT !important;
+    font-family: var(--font-ui) !important;
     font-size: var(--base-font-size) !important;
     line-height: 1.65 !important;
     letter-spacing: -0.01em !important;
     $SMOOTHING_OPTS
+}
+
+/* Explicit form element targeting */
+input, textarea, button, select {
+    font-family: $UI_FONT !important;
+    font-size: var(--base-font-size) !important;
 }
 
 /* Header & Small text scaling (including descendants) */
@@ -260,14 +263,7 @@ h5, h5 *, h6, h6 * { font-size: var(--base-font-size) !important; line-height: 1
 small, small * { font-size: calc(var(--base-font-size) * 0.85) !important; line-height: 1.5 !important; }
 sub, sub *, sup, sup * { font-size: calc(var(--base-font-size) * 0.75) !important; line-height: 0 !important; }
 
-:host, :host *, body, html,
-p, span, div, li, a, h1, h2, h3, h4, h5, h6,
-.prose, .prose *, .markdown-body, .markdown-body *, .message, .message *, 
-.content, .content *, [class*='markdown'], [class*='message'], [class*='response'],
-[class*='text'], [class*='bubble'], [class*='chat'] {
-    font-family: $UI_FONT !important;
-}
-
+/* Monospace overrides */
 pre, code, kbd, samp, xmp, plaintext, listing,
 .mono, .code, [class*='mono'], [class*='code'], [class*='monospace'],
 .mtk1, .mtk2, .mtk3, .mtk4, .mtk5, .mtk6, .mtk7, .mtk8,
@@ -286,19 +282,19 @@ textarea, select,
     border-radius: $($BORDER_RADIUS)px !important;
 }
 
-::-webkit-scrollbar { width: 7px !important; height: 7px !important; }
+::-webkit-scrollbar { width: 6px !important; height: 6px !important; }
 ::-webkit-scrollbar-track { background: transparent !important; }
-::-webkit-scrollbar-thumb { background: rgba(120, 120, 120, 0.25) !important; border-radius: 10px !important; }
-::-webkit-scrollbar-thumb:hover { background: rgba(120, 120, 120, 0.5) !important; }
+::-webkit-scrollbar-thumb { background: transparent !important; border-radius: 10px !important; }
+:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: rgba(120, 120, 120, 0.35) !important; }
 "@
-
-$CUSTOM_CSS_PATH_JS = ""
-if ($CUSTOM_CSS_PATH -ne "") {
-    $CUSTOM_CSS_PATH_JS = $CUSTOM_CSS_PATH.Replace('\', '\\')
-}
 
 $B64_BYTES = [System.Text.Encoding]::UTF8.GetBytes($INJECT_CSS)
 $B64_CSS = [System.Convert]::ToBase64String($B64_BYTES)
+
+$B64_CUSTOM_PATH = ""
+if ($CUSTOM_CSS_PATH -ne "") {
+    $B64_CUSTOM_PATH = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($CUSTOM_CSS_PATH))
+}
 
 $JS_PATCH = @"
 
@@ -308,7 +304,7 @@ try {
     const fs = require('fs');
 
     const coreCss = Buffer.from('$B64_CSS', 'base64').toString('utf-8');
-    const customCssPath = '$CUSTOM_CSS_PATH_JS';
+    const customCssPath = Buffer.from('$B64_CUSTOM_PATH', 'base64').toString('utf-8');
     let currentCustomCss = '';
 
     if (customCssPath && fs.existsSync(customCssPath)) {
@@ -394,6 +390,36 @@ try {
         "  if (document.head || document.documentElement) {\n" +
         "    inject(document);\n" +
         "  }\n" +
+        "  function handleInputAttributes(node) {\n" +
+        "    if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') {\n" +
+        "      const type = node.getAttribute('type');\n" +
+        "      if (type !== 'password' && type !== 'email') {\n" +
+        "        if (node.getAttribute('dir') !== 'auto') {\n" +
+        "          node.setAttribute('dir', 'auto');\n" +
+        "        }\n" +
+        "      }\n" +
+        "    }\n" +
+        "  }\n" +
+        "  function createObserver(root) {\n" +
+        "    const obs = new MutationObserver((mutations) => {\n" +
+        "      for (const mutation of mutations) {\n" +
+        "        if (mutation.type === 'childList') {\n" +
+        "          for (const node of mutation.addedNodes) {\n" +
+        "            if (node.nodeType === 1) pierce(node);\n" +
+        "          }\n" +
+        "        } else if (mutation.type === 'attributes') {\n" +
+        "          handleInputAttributes(mutation.target);\n" +
+        "        }\n" +
+        "      }\n" +
+        "    });\n" +
+        "    obs.observe(root, {\n" +
+        "      childList: true,\n" +
+        "      subtree: true,\n" +
+        "      attributes: true,\n" +
+        "      attributeFilter: ['dir', 'type']\n" +
+        "    });\n" +
+        "    return obs;\n" +
+        "  }\n" +
         "  function observeIframe(iframe) {\n" +
         "    try {\n" +
         "      const doc = iframe.contentDocument || iframe.contentWindow.document;\n" +
@@ -401,16 +427,7 @@ try {
         "        doc.gravityHooked = true;\n" +
         "        inject(doc);\n" +
         "        pierce(doc.documentElement);\n" +
-        "        const obs = new MutationObserver((mutations) => {\n" +
-        "          for (const mutation of mutations) {\n" +
-        "            for (const added of mutation.addedNodes) {\n" +
-        "              if (added.nodeType === 1) {\n" +
-        "                pierce(added);\n" +
-        "              }\n" +
-        "            }\n" +
-        "          }\n" +
-        "        });\n" +
-        "        obs.observe(doc.documentElement, { childList: true, subtree: true });\n" +
+        "        createObserver(doc.documentElement);\n" +
         "      }\n" +
         "    } catch(e) {}\n" +
         "  }\n" +
@@ -419,23 +436,14 @@ try {
         "    if (node.shadowRoot) {\n" +
         "      inject(node.shadowRoot);\n" +
         "      pierce(node.shadowRoot);\n" +
-        "      const obs = new MutationObserver((mutations) => {\n" +
-        "        for (const mutation of mutations) {\n" +
-        "          for (const added of mutation.addedNodes) {\n" +
-        "            if (added.nodeType === 1) pierce(added);\n" +
-        "          }\n" +
-        "        }\n" +
-        "      });\n" +
-        "      obs.observe(node.shadowRoot, { childList: true, subtree: true });\n" +
+        "      createObserver(node.shadowRoot);\n" +
         "    }\n" +
         "    if (node.tagName === 'IFRAME') {\n" +
         "      observeIframe(node);\n" +
         "      node.addEventListener('load', () => observeIframe(node));\n" +
         "    }\n" +
         "    if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') {\n" +
-        "      if (node.getAttribute('dir') !== 'auto') {\n" +
-        "        node.setAttribute('dir', 'auto');\n" +
-        "      }\n" +
+        "      handleInputAttributes(node);\n" +
         "    }\n" +
         "    const children = node.children || node.childNodes;\n" +
         "    if (children) {\n" +
@@ -461,16 +469,7 @@ try {
         "      return shadowRoot;\n" +
         "    };\n" +
         "  }\n" +
-        "  const observer = new MutationObserver((mutations) => {\n" +
-        "    for (const mutation of mutations) {\n" +
-        "      for (const node of mutation.addedNodes) {\n" +
-        "        if (node.nodeType === 1) {\n" +
-        "          pierce(node);\n" +
-        "        }\n" +
-        "      }\n" +
-        "    }\n" +
-        "  });\n" +
-        "  observer.observe(document.documentElement, { childList: true, subtree: true });\n" +
+        "  createObserver(document.documentElement);\n" +
         "})();";
 
     electronApp.on('web-contents-created', (createEvent, contents) => {
