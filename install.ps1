@@ -265,12 +265,12 @@ sub, sub *, sup, sup * { font-size: calc(var(--base-font-size) * 0.75) !importan
 
 /* Monospace overrides */
 pre, code, kbd, samp, xmp, plaintext, listing,
-.mono, .code, [class*='mono'], [class*='code'], [class*='monospace'],
+.mono, .code, [class~='mono'], [class~='code'], [class~='monospace'],
 .mtk1, .mtk2, .mtk3, .mtk4, .mtk5, .mtk6, .mtk7, .mtk8,
-.ace_editor, .monaco-editor, .cm-editor, .code-block, .token {
+.ace_editor, .monaco-editor, .cm-editor, .code-block, .code-line, .token {
     font-family: $MONO_FONT !important;
 }
-pre *, code *, .mono *, .code *, [class*='mono'] *, [class*='code'] *, .ace_editor *, .monaco-editor *, .cm-editor * {
+pre *, code *, .mono *, .code *, .code-block *, .code-line *, .ace_editor *, .monaco-editor *, .cm-editor * {
     font-family: $MONO_FONT !important;
 }
 
